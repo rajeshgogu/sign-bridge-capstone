@@ -847,31 +847,39 @@ const BUFFER_SIZE = 4;
 let predictionBuffer: string[] = [];
 
 export function classifyISLSign(
-  landmarks: HandLandmark[]
+  multiHands: HandLandmark[][]
 ): { label: string; confidence: number } | null {
-  if (landmarks.length < 21) return null;
+  if (!multiHands || multiHands.length === 0) return null;
 
-  const features = extractFeatures(landmarks);
+  let bestGlobalCandidate = { label: "", score: -1 };
 
-  // Score all signs
-  let candidates = ISL_SIGNS.map((rule) => ({
-    label: rule.label,
-    score: rule.match(features),
-  })).filter((c) => c.score > 0.55);
+  // Evaluate each hand independently and pick the best one (Ambidextrous support)
+  for (const landmarks of multiHands) {
+    if (landmarks.length < 21) continue;
 
-  if (candidates.length === 0) return null;
+    const features = extractFeatures(landmarks);
 
-  // Apply disambiguation
-  candidates = disambiguate(candidates, features);
+    // Score all signs
+    let candidates = ISL_SIGNS.map((rule) => ({
+      label: rule.label,
+      score: rule.match(features),
+    })).filter((c) => c.score > 0.55);
 
-  // Sort by score descending
-  candidates.sort((a, b) => b.score - a.score);
+    if (candidates.length > 0) {
+      candidates = disambiguate(candidates, features);
+      candidates.sort((a, b) => b.score - a.score);
 
-  const best = candidates[0];
-  if (best.score < 0.6) return null;
+      const best = candidates[0];
+      if (best.score > bestGlobalCandidate.score) {
+        bestGlobalCandidate = best;
+      }
+    }
+  }
+
+  if (bestGlobalCandidate.score < 0.6) return null;
 
   // Frame smoothing: require consistent prediction
-  predictionBuffer.push(best.label);
+  predictionBuffer.push(bestGlobalCandidate.label);
   if (predictionBuffer.length > BUFFER_SIZE) {
     predictionBuffer.shift();
   }
@@ -879,11 +887,11 @@ export function classifyISLSign(
   // Need at least 3 frames of consistent prediction
   if (predictionBuffer.length >= 3) {
     const last3 = predictionBuffer.slice(-3);
-    const allSame = last3.every((p) => p === best.label);
+    const allSame = last3.every((p) => p === bestGlobalCandidate.label);
     if (allSame) {
       return {
-        label: best.label,
-        confidence: Math.min(0.95, best.score),
+        label: bestGlobalCandidate.label,
+        confidence: Math.min(0.95, bestGlobalCandidate.score),
       };
     }
   }
@@ -891,10 +899,10 @@ export function classifyISLSign(
   // If buffer isn't consistent yet, still return with lower confidence
   if (predictionBuffer.length >= 2) {
     const last2 = predictionBuffer.slice(-2);
-    if (last2.every((p) => p === best.label)) {
+    if (last2.every((p) => p === bestGlobalCandidate.label)) {
       return {
-        label: best.label,
-        confidence: Math.min(0.85, best.score * 0.85),
+        label: bestGlobalCandidate.label,
+        confidence: Math.min(0.85, bestGlobalCandidate.score * 0.85),
       };
     }
   }

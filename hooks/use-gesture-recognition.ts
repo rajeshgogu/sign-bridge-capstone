@@ -55,15 +55,18 @@ export function useGestureRecognition(
       const results = landmarker.detectForVideo(video, now);
 
       if (results.landmarks && results.landmarks.length > 0) {
-        const handLandmarks = results.landmarks[0] as HandLandmark[];
-        drawLandmarks(handLandmarks, video.videoWidth, video.videoHeight);
+        // Draw all detected hands
+        results.landmarks.forEach((handLandmarks) => {
+           drawLandmarks(handLandmarks, video.videoWidth, video.videoHeight);
+        });
 
-        // Try TF.js classification
+        // Try TF.js classification using the first hand (TF.js model is likely single-hand trained)
+        let tfSuccess = false;
         try {
           const { normalizeLandmarks } = await import(
             "@/lib/ml/hand-landmark-utils"
           );
-          const features = normalizeLandmarks(handLandmarks);
+          const features = normalizeLandmarks(results.landmarks[0]);
 
           if (features.length > 0) {
             const { loadGestureModel, predict } = await import(
@@ -74,13 +77,20 @@ export function useGestureRecognition(
 
             if (result.confidence > 0.7) {
               setPrediction(result.label, result.confidence);
+              tfSuccess = true;
             }
           }
         } catch {
-          // TF model not available — use ISL heuristic classifier
-          const result = await getISLGestureLabel(handLandmarks);
+          // Ignore TF errors, move to fallback
+        }
+
+        if (!tfSuccess) {
+          // ISL heuristic classifier (Ambidextrous/Dual-hand supported)
+          const result = await getISLGestureLabel(results.landmarks);
           if (result) {
             setPrediction(result.label, result.confidence);
+          } else {
+            clearPrediction();
           }
         }
       } else {
@@ -124,7 +134,7 @@ export function useGestureRecognition(
 
 // ISL heuristic classifier — used when TF.js model is unavailable
 async function getISLGestureLabel(
-  landmarks: HandLandmark[]
+  landmarks: HandLandmark[][]
 ): Promise<{ label: string; confidence: number } | null> {
   try {
     const { classifyISLSign } = await import(

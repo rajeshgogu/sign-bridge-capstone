@@ -1,14 +1,15 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import {
   userProgress,
   userSignProgress,
   userActivity,
   lessonSigns,
+  users,
+  streaks,
 } from "@/lib/db/schema";
 import { eq, and, count } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { updateProgressSchema } from "@/lib/validators/progress";
 import { updateStreak } from "@/lib/helpers/streak";
 import {
   calculateCompletionPercentage,
@@ -18,6 +19,7 @@ import {
 export async function GET() {
   try {
     const { userId } = await auth();
+
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -33,7 +35,8 @@ export async function GET() {
       .where(eq(userSignProgress.userId, userId));
 
     return NextResponse.json({ progress, signProgress });
-  } catch {
+  } catch (error) {
+    console.error("GET ERROR:", error);
     return NextResponse.json(
       { error: "Failed to fetch progress" },
       { status: 500 }
@@ -44,22 +47,51 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
+
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
-    const parsed = updateProgressSchema.safeParse(body);
+    console.log("REQUEST BODY:", body); // ✅ debug
 
-    if (!parsed.success) {
+    const { lessonId, signId, action } = body;
+
+    // ✅ BASIC VALIDATION (no schema blocking now)
+    if (!lessonId || !action) {
       return NextResponse.json(
-        { error: "Invalid request", details: parsed.error.flatten() },
+        { error: "lessonId and action are required" },
         { status: 400 }
       );
     }
 
-    const { lessonId, signId, action } = parsed.data;
+    // Ensure user exists in db
+    const [existingUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId));
 
+    if (!existingUser) {
+      const clerkUser = await currentUser();
+      if (clerkUser) {
+        await db.insert(users).values({
+          id: userId,
+          email: clerkUser.emailAddresses[0]?.emailAddress ?? "",
+          firstName: clerkUser.firstName,
+          lastName: clerkUser.lastName,
+          imageUrl: clerkUser.imageUrl,
+        });
+        await db.insert(streaks).values({
+          userId,
+          currentStreak: 0,
+          longestStreak: 0,
+        });
+      }
+    }
+
+    // ===============================
+    // ✅ START LESSON
+    // ===============================
     if (action === "start_lesson") {
       const [totalSignsResult] = await db
         .select({ count: count() })
@@ -104,6 +136,9 @@ export async function POST(req: NextRequest) {
       await updateStreak(userId);
     }
 
+    // ===============================
+    // ✅ MARK SIGN AS LEARNED
+    // ===============================
     if (action === "mark_learned" && signId) {
       const [existing] = await db
         .select()
@@ -135,7 +170,7 @@ export async function POST(req: NextRequest) {
           .where(eq(userSignProgress.id, existing.id));
       }
 
-      // Update lesson progress
+      // ✅ UPDATE LESSON PROGRESS
       const [lessonProgress] = await db
         .select()
         .from(userProgress)
@@ -149,6 +184,7 @@ export async function POST(req: NextRequest) {
       if (lessonProgress) {
         const newCompleted = (lessonProgress.completedSigns ?? 0) + 1;
         const total = lessonProgress.totalSigns ?? 0;
+
         const percentage = calculateCompletionPercentage(newCompleted, total);
         const status = getLessonStatus(newCompleted, total);
 
@@ -174,6 +210,9 @@ export async function POST(req: NextRequest) {
       await updateStreak(userId);
     }
 
+    // ===============================
+    // ✅ COMPLETE LESSON
+    // ===============================
     if (action === "complete_lesson") {
       await db
         .update(userProgress)
@@ -201,10 +240,15 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to update progress" },
-      { status: 500 }
-    );
-  }
+  } catch (error) {
+  console.error("🔥 FULL ERROR:", error);
+
+  return NextResponse.json(
+    {
+      error: "Failed to update progress",
+      details: String(error), // 👈 THIS LINE IS IMPORTANT
+    },
+    { status: 500 }
+  );
+}
 }

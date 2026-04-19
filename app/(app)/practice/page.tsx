@@ -19,6 +19,11 @@ const practiceOptions = [
     description: "Test your sign language knowledge with interactive quizzes.",
     href: "/practice/quiz",
   },
+  {
+    title: "Phrases Practice",
+    description: "Learn and practice common sign language phrases with your camera.",
+    href: "/practice/phrases",
+  },
 ];
 
 export default function PracticePage() {

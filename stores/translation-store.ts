@@ -1,10 +1,12 @@
 import { create } from "zustand";
 
-interface TranslationSign {
-  id: number;
+export interface TranslationSign {
+  id: number | string;
   name: string;
   imageUrl: string | null;
   gifUrl: string | null;
+  instructions?: string;
+  isPhrase?: boolean;
 }
 
 interface TranslationState {

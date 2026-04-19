@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Loader2, Sparkles } from "lucide-react";
 import { useTranslationStore } from "@/stores/translation-store";
 import ReactMarkdown from "react-markdown";
@@ -15,10 +16,9 @@ export function TranslationResult() {
 
   if (signSequence.length === 0) return null;
 
-  const matchedWords = signSequence.map((s) => s.name);
-  const fingerspelled = signSequence
-    .filter((s) => s.name.length === 1)
-    .map((s) => s.name);
+  const phrases = signSequence.filter((s) => s.isPhrase);
+  const letters = signSequence.filter((s) => !s.isPhrase && s.name.length === 1);
+  const words = signSequence.filter((s) => !s.isPhrase && s.name.length > 1);
 
   const handleAIAssist = async () => {
     setLoadingAI(true);
@@ -26,10 +26,7 @@ export function TranslationResult() {
       const res = await fetch("/api/translate/ai-assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: inputText,
-          type: "translate",
-        }),
+        body: JSON.stringify({ text: inputText, type: "translate" }),
       });
       if (!res.ok) throw new Error("AI assist failed");
       const data = await res.json();
@@ -53,27 +50,69 @@ export function TranslationResult() {
         </div>
 
         <div className="text-sm">
-          <span className="text-muted-foreground">Signs matched: </span>
+          <span className="text-muted-foreground">Signs found: </span>
           <span>{signSequence.length}</span>
+          {phrases.length > 0 && (
+            <span className="ml-2 text-primary font-medium">
+              ({phrases.length} phrase{phrases.length > 1 ? "s" : ""} matched ✓)
+            </span>
+          )}
         </div>
 
-        {fingerspelled.length > 0 && (
-          <div className="text-sm">
-            <span className="text-muted-foreground">Fingerspelled: </span>
-            <span className="font-mono">{fingerspelled.join("")}</span>
+        {/* Phrase-level matches */}
+        {phrases.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Phrase Signs
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {phrases.map((sign, i) => (
+                <Badge
+                  key={i}
+                  className="bg-primary/15 text-primary border-primary/30 hover:bg-primary/20"
+                  variant="outline"
+                >
+                  {sign.name}
+                </Badge>
+              ))}
+            </div>
           </div>
         )}
 
-        <div className="flex flex-wrap gap-1.5">
-          {matchedWords.map((word, i) => (
-            <span
-              key={i}
-              className="rounded-full border bg-muted px-2 py-0.5 text-xs"
-            >
-              {word}
-            </span>
-          ))}
-        </div>
+        {/* Word-level matches */}
+        {words.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Word Signs
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {words.map((sign, i) => (
+                <Badge key={i} variant="secondary">
+                  {sign.name}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Fingerspelled letters */}
+        {letters.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Fingerspelled
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {letters.map((sign, i) => (
+                <span
+                  key={i}
+                  className="rounded border bg-muted px-2 py-0.5 font-mono text-xs"
+                >
+                  {sign.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         <Button
           variant="outline"
